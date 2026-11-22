@@ -1,0 +1,19 @@
+metrics:
+  driver: metrics-server
+  prometheus_url: ""
+  prometheus_query: '100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])))'
+  kubeconfig: "/root/.kube/config"
+  host_map: {}
+
+spot:
+  flavors:
+    - 71ce07f3-ba0f-476a-add0-f01a13d2aa44
+  threshold: 80
+  min_improvement: 20
+  shelve_when_no_destination: true
+
+controller:
+  interval: 1m
+  cooldown: 30m
+  max_metrics_age: 3m
+  dry_run: false

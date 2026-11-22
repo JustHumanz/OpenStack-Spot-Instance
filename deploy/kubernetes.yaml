@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spot-controller-config
+  namespace: openstack
+data:
+  config.yaml: |
+    metrics:
+      driver: metrics-server
+      prometheus_url: ""
+      prometheus_query: '100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])))'
+      kubeconfig: ""
+      host_map: {}
+    spot:
+      flavors:
+        - 71ce07f3-ba0f-476a-add0-f01a13d2aa44
+      threshold: 80
+      min_improvement: 20
+      shelve_when_no_destination: true
+    controller:
+      interval: 1m
+      cooldown: 30m
+      max_metrics_age: 3m
+      dry_run: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spot-controller
+  namespace: openstack
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: spot-controller-metrics-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: spot-controller-metrics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spot-controller-metrics-reader
+subjects:
+  - kind: ServiceAccount
+    name: spot-controller
+    namespace: openstack
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spot-controller
+  namespace: openstack
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: spot-controller
+  template:
+    metadata:
+      labels:
+        app: spot-controller
+    spec:
+      serviceAccountName: spot-controller
+      containers:
+        - name: controller
+          image: hub.humanz.moe/library/nova-spot-instance:dev
+          imagePullPolicy: Always
+          args:
+            - -config=/etc/spot-controller/config.yaml
+          env:
+            - name: OS_INTERFACE
+              value: internal
+            - name: OS_CLOUD
+              value: openstack
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+          - name: controller-config
+            mountPath: "/etc/spot-controller/"
+            readOnly: true
+          - name: os-cloud-config
+            mountPath: "/etc/openstack/"
+            readOnly: true              
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+      - name: controller-config
+        configMap:
+          name: spot-controller-config
+      - name: os-cloud-config
+        secret:
+          secretName: humans-cloud-config
